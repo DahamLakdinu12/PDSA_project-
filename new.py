@@ -10,7 +10,6 @@ import numpy as np
 import cv2
 import os
 
-# -------------------------------
 #  Dataset Configuration
 # -------------------------------
 dataset_path = "/Users/dahamlakdinu/Desktop/strawberryDataset"
@@ -40,7 +39,6 @@ val_data = datagen.flow_from_directory(
     subset='validation'
 )
 
-# -------------------------------
 #  Build CNN Model
 # -------------------------------
 model = Sequential([
