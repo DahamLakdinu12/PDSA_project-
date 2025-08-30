@@ -11,7 +11,7 @@ import cv2
 import os
 
 # -------------------------------
-# 1️⃣ Dataset Configuration
+#  Dataset Configuration
 # -------------------------------
 dataset_path = "/Users/dahamlakdinu/Desktop/strawberryDataset"
  # Change to your dataset folder pathc
@@ -41,7 +41,7 @@ val_data = datagen.flow_from_directory(
 )
 
 # -------------------------------
-# 2️⃣ Build CNN Model
+#  Build CNN Model
 # -------------------------------
 model = Sequential([
     Conv2D(32, (3,3), activation='relu', input_shape=(150,150,3)),
@@ -59,7 +59,7 @@ model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy']
 model.summary()
 
 # -------------------------------
-# 3️⃣ Train Model
+#  Train Model
 # -------------------------------
 early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
 history = model.fit(
@@ -70,7 +70,7 @@ history = model.fit(
 )
 
 # -------------------------------
-# 4️⃣ Plot Accuracy & Loss
+#  Plot Accuracy & Loss
 # -------------------------------
 plt.figure(figsize=(12,5))
 
@@ -93,7 +93,7 @@ plt.legend()
 plt.show()
 
 # -------------------------------
-# 5️⃣ Webcam Capture & Prediction
+# Webcam Capture & Prediction
 # -------------------------------
 def capture_and_predict(model):
     cap = cv2.VideoCapture(0)
