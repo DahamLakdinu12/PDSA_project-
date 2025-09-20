@@ -20,19 +20,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.strawberrypickerapp.ui.theme.StrawberryPickerAppTheme
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import androidx.camera.core.ImageProxy
-
+import android.util.Log
 
 class MainActivity : ComponentActivity() {
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val frameQueue: LinkedBlockingQueue<Bitmap> = LinkedBlockingQueue(5)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,18 +42,28 @@ class MainActivity : ComponentActivity() {
         val classifier = Classifier(assets)
         var resultText by mutableStateOf("Waiting...")
 
+        // ---- Option A: Auto classification every second ----
+        Executors.newSingleThreadExecutor().execute {
+            while (!isFinishing) {
+                try {
+                    val bitmap = frameQueue.take()
+                    val result = classifier.classify(bitmap)
+                    runOnUiThread { resultText = result }
+                    Thread.sleep(1000) // classify 1 frame per second
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    runOnUiThread { resultText = "⚠️ Error: ${e.message}" }
+                }
+            }
+        }
+
         // Permission launcher
         val cameraPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
-            if (granted) {
-                // Camera will start after Compose initializes the PreviewView
-            } else {
-                resultText = "Camera permission denied"
-            }
+            if (!granted) resultText = "Camera permission denied"
         }
 
-        // Check permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -67,18 +78,17 @@ class MainActivity : ComponentActivity() {
                             .fillMaxSize()
                             .padding(innerPadding)
                     ) {
-                        // PreviewView displayed in Compose
+                        // Camera preview
                         AndroidView(
                             factory = { ctx ->
                                 PreviewView(ctx).apply {
-                                    // Start CameraX once the view is ready
                                     if (ContextCompat.checkSelfPermission(
                                             ctx,
                                             Manifest.permission.CAMERA
                                         ) == PackageManager.PERMISSION_GRANTED
                                     ) {
-                                        startCamera(this, classifier) { result ->
-                                            resultText = result
+                                        startCamera(this) { bitmap ->
+                                            frameQueue.offer(bitmap) // add to queue
                                         }
                                     }
                                 }
@@ -90,11 +100,28 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(16.dp))
 
+                        // Result text
                         Text(
                             text = resultText,
                             style = MaterialTheme.typography.headlineMedium,
                             modifier = Modifier.padding(16.dp)
                         )
+
+                        // ---- Option B: Manual capture button ----
+                        Button(
+                            onClick = {
+                                val bitmap = frameQueue.poll()
+                                if (bitmap != null) {
+                                    val result = classifier.classify(bitmap)
+                                    resultText = result
+                                } else {
+                                    resultText = "⚠️ No frame available"
+                                }
+                            },
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text("📸 Capture & Classify")
+                        }
                     }
                 }
             }
@@ -103,8 +130,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startCamera(
         previewView: PreviewView,
-        classifier: Classifier,
-        onResult: (String) -> Unit
+        onFrameCaptured: (Bitmap) -> Unit
     ) {
         val context = this
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -123,8 +149,10 @@ class MainActivity : ComponentActivity() {
             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                 val bitmap = imageProxy.toBitmap()
                 if (bitmap != null) {
-                    val result = classifier.classify(bitmap)
-                    runOnUiThread { onResult(result) }
+                    Log.d("CameraX", "Frame captured: ${bitmap.width}x${bitmap.height}")
+                    onFrameCaptured(bitmap)
+                } else {
+                    Log.e("CameraX", "Bitmap conversion failed")
                 }
                 imageProxy.close()
             }
@@ -142,26 +170,31 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * Helper function to convert ImageProxy to Bitmap
+ * Convert ImageProxy to Bitmap
  */
 fun ImageProxy.toBitmap(): Bitmap? {
-    val yBuffer = planes[0].buffer
-    val uBuffer = planes[1].buffer
-    val vBuffer = planes[2].buffer
+    return try {
+        val yBuffer = planes[0].buffer
+        val uBuffer = planes[1].buffer
+        val vBuffer = planes[2].buffer
 
-    val ySize = yBuffer.remaining()
-    val uSize = uBuffer.remaining()
-    val vSize = vBuffer.remaining()
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
 
-    val nv21 = ByteArray(ySize + uSize + vSize)
+        val nv21 = ByteArray(ySize + uSize + vSize)
 
-    yBuffer.get(nv21, 0, ySize)
-    vBuffer.get(nv21, ySize, vSize)
-    uBuffer.get(nv21, ySize + vSize, uSize)
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
 
-    val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-    val out = ByteArrayOutputStream()
-    yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
-    val imageBytes = out.toByteArray()
-    return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
+        val imageBytes = out.toByteArray()
+        BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }
